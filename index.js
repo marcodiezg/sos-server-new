@@ -26,9 +26,9 @@ const wss = new WebSocket.Server({
 wss.on('connection', (ws, req) => {
     console.log('🎤 Nueva conexión WebSocket establecida');
     
-    let audioChunks = [];
     let callInProgress = false;
     let currentCall = null;
+    let mediaStream = null;
 
     // Enviar mensaje de bienvenida
     ws.send(JSON.stringify({ type: 'welcome', message: 'Conexión establecida' }));
@@ -40,8 +40,19 @@ wss.on('connection', (ws, req) => {
                 const control = JSON.parse(data);
                 if (control.type === 'start_call') {
                     console.log('🎯 Iniciando llamada de emergencia');
+                    
+                    // Primero enviamos el SMS
+                    console.log('📱 Enviando SMS...');
+                    const message = await client.messages.create({
+                        body: '🚨 ALERTA DE EMERGENCIA: Se ha activado el botón de emergencia.',
+                        from: process.env.TWILIO_PHONE_NUMBER,
+                        to: '+34671220070'
+                    });
+                    console.log('✅ SMS enviado:', message.sid);
+
+                    // Luego iniciamos la llamada
                     const call = await client.calls.create({
-                        twiml: '<Response><Say language="es-ES">Alerta de emergencia activada. Mantenga la línea para escuchar el audio en directo.</Say><Stream url="wss://sos-server-new-production.up.railway.app/stream"/></Response>',
+                        twiml: '<Response><Say language="es-ES">Alerta de emergencia activada. Mantenga la línea para escuchar el audio en directo.</Say><Connect><Stream url="wss://sos-server-new-production.up.railway.app/stream"/></Connect></Response>',
                         to: '+34671220070',
                         from: process.env.TWILIO_PHONE_NUMBER,
                         statusCallback: `${process.env.SERVER_URL}/call-status`,
@@ -52,33 +63,16 @@ wss.on('connection', (ws, req) => {
                     currentCall = call;
                     console.log('📞 Llamada iniciada:', call.sid);
                     ws.send(JSON.stringify({ type: 'call_started', callId: call.sid }));
-
-                    // Enviar SMS
-                    const message = await client.messages.create({
-                        body: '🚨 ALERTA DE EMERGENCIA: Se ha activado el botón de emergencia.',
-                        from: process.env.TWILIO_PHONE_NUMBER,
-                        to: '+34671220070'
-                    });
-                    console.log('✅ SMS enviado:', message.sid);
                 }
             } 
             // Si es un buffer de audio
-            else {
-                if (callInProgress) {
-                    // Almacenar el chunk de audio
-                    audioChunks.push(data);
-                    // Si tenemos suficientes chunks, los enviamos y limpiamos el buffer
-                    if (audioChunks.length >= 5) {
-                        const audioBuffer = Buffer.concat(audioChunks);
-                        console.log(`🎵 Enviando audio - Tamaño: ${audioBuffer.length} bytes`);
-                        wss.clients.forEach(client => {
-                            if (client !== ws && client.readyState === WebSocket.OPEN) {
-                                client.send(audioBuffer);
-                            }
-                        });
-                        audioChunks = [];
+            else if (callInProgress) {
+                // Transmitir el audio directamente a los clientes conectados
+                wss.clients.forEach(client => {
+                    if (client !== ws && client.readyState === WebSocket.OPEN) {
+                        client.send(data);
                     }
-                }
+                });
             }
         } catch (error) {
             console.error('❌ Error procesando mensaje:', error);
