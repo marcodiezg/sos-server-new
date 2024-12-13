@@ -25,12 +25,10 @@ const wss = new WebSocket.Server({
 // Manejar conexiones WebSocket
 wss.on('connection', (ws, req) => {
     console.log('🎤 Nueva conexión WebSocket establecida');
-    console.log('🔌 Headers:', req.headers);
-    console.log('👥 Clientes conectados:', wss.clients.size);
     
+    let audioChunks = [];
     let callInProgress = false;
     let currentCall = null;
-    let audioBuffer = Buffer.alloc(0);
 
     // Enviar mensaje de bienvenida
     ws.send(JSON.stringify({ type: 'welcome', message: 'Conexión establecida' }));
@@ -43,22 +41,43 @@ wss.on('connection', (ws, req) => {
                 if (control.type === 'start_call') {
                     console.log('🎯 Iniciando llamada de emergencia');
                     const call = await client.calls.create({
-                        url: `${process.env.SERVER_URL}/twiml`,
+                        twiml: '<Response><Say language="es-ES">Alerta de emergencia activada. Mantenga la línea para escuchar el audio en directo.</Say><Stream url="wss://sos-server-new-production.up.railway.app/stream"/></Response>',
                         to: '+34671220070',
-                        from: process.env.TWILIO_PHONE_NUMBER
+                        from: process.env.TWILIO_PHONE_NUMBER,
+                        statusCallback: `${process.env.SERVER_URL}/call-status`,
+                        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+                        statusCallbackMethod: 'POST'
                     });
                     callInProgress = true;
                     currentCall = call;
                     console.log('📞 Llamada iniciada:', call.sid);
                     ws.send(JSON.stringify({ type: 'call_started', callId: call.sid }));
+
+                    // Enviar SMS
+                    const message = await client.messages.create({
+                        body: '🚨 ALERTA DE EMERGENCIA: Se ha activado el botón de emergencia.',
+                        from: process.env.TWILIO_PHONE_NUMBER,
+                        to: '+34671220070'
+                    });
+                    console.log('✅ SMS enviado:', message.sid);
                 }
             } 
             // Si es un buffer de audio
             else {
                 if (callInProgress) {
-                    audioBuffer = Buffer.concat([audioBuffer, data]);
-                    console.log(`🎵 Audio recibido - Tamaño: ${data.length} bytes`);
-                    ws.send(JSON.stringify({ type: 'audio_received', size: data.length }));
+                    // Almacenar el chunk de audio
+                    audioChunks.push(data);
+                    // Si tenemos suficientes chunks, los enviamos y limpiamos el buffer
+                    if (audioChunks.length >= 5) {
+                        const audioBuffer = Buffer.concat(audioChunks);
+                        console.log(`🎵 Enviando audio - Tamaño: ${audioBuffer.length} bytes`);
+                        wss.clients.forEach(client => {
+                            if (client !== ws && client.readyState === WebSocket.OPEN) {
+                                client.send(audioBuffer);
+                            }
+                        });
+                        audioChunks = [];
+                    }
                 }
             }
         } catch (error) {
