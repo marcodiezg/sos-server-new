@@ -42,28 +42,29 @@ wss.on('connection', (ws, req) => {
         try {
             // Si es un mensaje de texto (control)
             if (typeof data === 'string') {
-                const control = JSON.parse(data);
-                if (control.type === 'start_call') {
-                    console.log('🎯 Iniciando llamada de emergencia');
-                    
-                    // Primero enviamos el SMS
-                    console.log('📱 Enviando SMS...');
-                    const message = await client.messages.create({
-                        body: '🚨 ALERTA DE EMERGENCIA: Se ha activado el botón de emergencia.',
-                        from: process.env.TWILIO_PHONE_NUMBER,
-                        to: '+34671220070'
-                    });
-                    console.log('✅ SMS enviado:', message.sid);
+                const message = JSON.parse(data);
+                console.log('📨 Mensaje recibido:', message);
 
-                    // Luego iniciamos la llamada
+                if (message.type === 'send_sms') {
+                    console.log('📱 Enviando SMS...');
+                    const sms = await client.messages.create({
+                        body: message.body || '🚨 ALERTA DE EMERGENCIA: Se ha activado el botón de emergencia.',
+                        from: process.env.TWILIO_PHONE_NUMBER,
+                        to: message.to
+                    });
+                    console.log('✅ SMS enviado:', sms.sid);
+                    ws.send(JSON.stringify({ type: 'sms_sent', messageId: sms.sid }));
+                }
+                else if (message.type === 'start_call') {
+                    console.log('📞 Iniciando llamada...');
                     const call = await client.calls.create({
                         twiml: '<Response><Say language="es-ES">Alerta de emergencia activada. Mantenga la línea para escuchar el audio en directo.</Say><Connect><Stream url="wss://sos-server-new-production.up.railway.app/stream"/></Connect></Response>',
-                        to: '+34671220070',
+                        to: message.to,
                         from: process.env.TWILIO_PHONE_NUMBER
                     });
                     callInProgress = true;
                     currentCall = call;
-                    console.log('📞 Llamada iniciada:', call.sid);
+                    console.log('✅ Llamada iniciada:', call.sid);
                     ws.send(JSON.stringify({ type: 'call_started', callId: call.sid }));
                 }
             } 
