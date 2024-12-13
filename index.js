@@ -17,33 +17,79 @@ app.use(bodyParser.urlencoded({ extended: true }));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ 
     server,
-    path: '/stream'
+    path: '/stream',
+    clientTracking: true,
+    perMessageDeflate: false
 });
 
 // Manejar conexiones WebSocket
 wss.on('connection', (ws, req) => {
     console.log('🎤 Nueva conexión WebSocket establecida');
     console.log('🔌 Headers:', req.headers);
+    console.log('👥 Clientes conectados:', wss.clients.size);
     
     let lastMessageTime = Date.now();
     let audioBuffer = Buffer.alloc(0);
+
+    // Enviar mensaje de bienvenida
+    ws.send(JSON.stringify({ type: 'welcome', message: 'Conexión establecida' }));
 
     ws.on('message', (data) => {
         try {
             lastMessageTime = Date.now();
             audioBuffer = Buffer.concat([audioBuffer, data]);
             console.log(`🎵 Audio recibido - Tamaño: ${data.length} bytes`);
+            
+            // Enviar confirmación
+            ws.send(JSON.stringify({ type: 'ack', size: data.length }));
         } catch (error) {
             console.error('❌ Error procesando audio:', error);
+            ws.send(JSON.stringify({ type: 'error', message: error.message }));
         }
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
         console.log('🔌 Conexión WebSocket cerrada');
+        console.log('📊 Código:', code);
+        console.log('📝 Razón:', reason);
+        console.log('👥 Clientes restantes:', wss.clients.size);
     });
 
     ws.on('error', (error) => {
         console.error('❌ Error en WebSocket:', error);
+    });
+
+    // Ping para mantener la conexión viva
+    const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.ping();
+        }
+    }, 30000);
+
+    ws.on('pong', () => {
+        console.log('📡 Pong recibido');
+    });
+
+    ws.on('close', () => {
+        clearInterval(pingInterval);
+    });
+});
+
+// Verificar estado del WebSocket Server
+wss.on('error', (error) => {
+    console.error('❌ Error en WebSocket Server:', error);
+});
+
+wss.on('close', () => {
+    console.log('🔌 WebSocket Server cerrado');
+});
+
+// Ruta para verificar estado del WebSocket
+app.get('/ws-status', (req, res) => {
+    res.json({
+        status: 'ok',
+        clients: wss.clients.size,
+        ready: wss.readyState === WebSocket.OPEN
     });
 });
 
@@ -134,4 +180,5 @@ server.listen(PORT, () => {
     console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
     console.log(`📞 TwiML URL: ${process.env.SERVER_URL}/twiml`);
     console.log(`🎤 WebSocket URL: wss://${serverHost}/stream`);
+    console.log(`📊 Estado WebSocket: ${wss.readyState}`);
 }); 
