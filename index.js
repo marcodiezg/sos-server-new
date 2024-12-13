@@ -270,3 +270,60 @@ server.listen(PORT, () => {
     console.log(`🎤 WebSocket URL: wss://${serverHost}/stream`);
     console.log(`📊 Estado WebSocket: ${wss.readyState}`);
 }); 
+
+// Configuración de Twilio
+console.log('🔑 Inicializando Twilio con:', {
+    accountSid: process.env.TWILIO_ACCOUNT_SID,
+    phoneNumber: process.env.TWILIO_PHONE_NUMBER
+});
+
+// Ruta de prueba para verificar credenciales
+app.get('/verify', async (req, res) => {
+    try {
+        console.log('🔍 Verificando credenciales de Twilio...');
+        const account = await client.api.accounts(process.env.TWILIO_ACCOUNT_SID).fetch();
+        console.log('✅ Cuenta verificada:', account.friendlyName);
+        res.json({ 
+            status: 'ok',
+            account: account.friendlyName,
+            phoneNumber: process.env.TWILIO_PHONE_NUMBER
+        });
+    } catch (error) {
+        console.error('❌ Error verificando cuenta:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Ruta para hacer llamada de prueba
+app.get('/test-call', async (req, res) => {
+    try {
+        console.log('📞 Iniciando llamada de prueba...');
+        const call = await client.calls.create({
+            twiml: '<Response><Say language="es-ES">Esta es una llamada de prueba.</Say></Response>',
+            to: '+34671220070',
+            from: process.env.TWILIO_PHONE_NUMBER
+        });
+        console.log('✅ Llamada de prueba iniciada:', call.sid);
+        res.json({ success: true, callId: call.sid });
+    } catch (error) {
+        console.error('❌ Error en llamada de prueba:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Ruta para enviar SMS de prueba
+app.get('/test-sms', async (req, res) => {
+    try {
+        console.log('📱 Enviando SMS de prueba...');
+        const message = await client.messages.create({
+            body: 'Este es un mensaje de prueba.',
+            from: process.env.TWILIO_PHONE_NUMBER,
+            to: '+34671220070'
+        });
+        console.log('✅ SMS de prueba enviado:', message.sid);
+        res.json({ success: true, messageId: message.sid });
+    } catch (error) {
+        console.error('❌ Error enviando SMS de prueba:', error);
+        res.status(500).json({ error: error.message });
+    }
+}); 
