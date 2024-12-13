@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
+const WebSocket = require('ws');
+const http = require('http');
 const client = require('twilio')(
     process.env.TWILIO_ACCOUNT_SID,
     process.env.TWILIO_AUTH_TOKEN
@@ -10,6 +12,40 @@ const VoiceResponse = require('twilio').twiml.VoiceResponse;
 const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// Crear servidor HTTP y WebSocket
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ 
+    server,
+    path: '/stream'
+});
+
+// Manejar conexiones WebSocket
+wss.on('connection', (ws, req) => {
+    console.log('🎤 Nueva conexión WebSocket establecida');
+    console.log('🔌 Headers:', req.headers);
+    
+    let lastMessageTime = Date.now();
+    let audioBuffer = Buffer.alloc(0);
+
+    ws.on('message', (data) => {
+        try {
+            lastMessageTime = Date.now();
+            audioBuffer = Buffer.concat([audioBuffer, data]);
+            console.log(`🎵 Audio recibido - Tamaño: ${data.length} bytes`);
+        } catch (error) {
+            console.error('❌ Error procesando audio:', error);
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('🔌 Conexión WebSocket cerrada');
+    });
+
+    ws.on('error', (error) => {
+        console.error('❌ Error en WebSocket:', error);
+    });
+});
 
 // Ruta de prueba
 app.get('/', (req, res) => {
@@ -91,7 +127,11 @@ app.post('/make-call', async (req, res) => {
     }
 });
 
+// Iniciar servidor HTTP con WebSocket
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-    console.log(`Servidor iniciado en puerto ${PORT}`);
+const serverHost = process.env.SERVER_URL.replace('https://', '');
+server.listen(PORT, () => {
+    console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
+    console.log(`📞 TwiML URL: ${process.env.SERVER_URL}/twiml`);
+    console.log(`🎤 WebSocket URL: wss://${serverHost}/stream`);
 }); 
