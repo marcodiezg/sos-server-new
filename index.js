@@ -16,6 +16,36 @@ app.get('/', (req, res) => {
     res.json({ status: 'ok', message: 'Servidor funcionando' });
 });
 
+// Ruta para enviar SMS
+app.post('/send-sms', async (req, res) => {
+    try {
+        const { to, message } = req.body;
+        if (!to || !message) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Se requieren los campos "to" y "message"' 
+            });
+        }
+
+        const twilioMessage = await client.messages.create({
+            body: message,
+            from: process.env.TWILIO_PHONE_NUMBER,
+            to: to
+        });
+
+        res.json({ 
+            success: true, 
+            messageId: twilioMessage.sid 
+        });
+    } catch (error) {
+        console.error('Error al enviar SMS:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
 // Ruta para TwiML
 app.all('/twiml', (req, res) => {
     console.log('TwiML endpoint llamado:', req.method);
