@@ -29,8 +29,73 @@ app.use(bodyParser.urlencoded({ extended: true }));
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ 
     server,
-    path: '/stream',
-    clientTracking: true
+    path: '/stream'
+});
+
+// Manejar conexiones WebSocket
+wss.on('connection', (ws, req) => {
+    console.log('🎤 Nueva conexión WebSocket establecida');
+    let callInProgress = false;
+    let currentCall = null;
+
+    ws.on('message', async (data) => {
+        try {
+            // Si es un mensaje de texto (control)
+            if (typeof data === 'string') {
+                const control = JSON.parse(data);
+                if (control.type === 'start_call') {
+                    console.log('🎯 Iniciando llamada de emergencia');
+                    
+                    // Primero enviamos el SMS
+                    console.log('📱 Enviando SMS...');
+                    const message = await client.messages.create({
+                        body: '🚨 ALERTA DE EMERGENCIA: Se ha activado el botón de emergencia.',
+                        from: process.env.TWILIO_PHONE_NUMBER,
+                        to: '+34671220070'
+                    });
+                    console.log('✅ SMS enviado:', message.sid);
+
+                    // Luego iniciamos la llamada
+                    const call = await client.calls.create({
+                        twiml: '<Response><Say language="es-ES">Alerta de emergencia activada. Mantenga la línea para escuchar el audio en directo.</Say><Connect><Stream url="wss://sos-server-new-production.up.railway.app/stream"/></Connect></Response>',
+                        to: '+34671220070',
+                        from: process.env.TWILIO_PHONE_NUMBER
+                    });
+                    callInProgress = true;
+                    currentCall = call;
+                    console.log('📞 Llamada iniciada:', call.sid);
+                    ws.send(JSON.stringify({ type: 'call_started', callId: call.sid }));
+                }
+            } 
+            // Si es un buffer de audio
+            else if (callInProgress) {
+                // Transmitir el audio directamente
+                wss.clients.forEach(client => {
+                    if (client !== ws && client.readyState === WebSocket.OPEN) {
+                        client.send(data);
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('❌ Error procesando mensaje:', error);
+            ws.send(JSON.stringify({ type: 'error', message: error.message }));
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('🔌 Conexión WebSocket cerrada');
+        if (callInProgress && currentCall) {
+            console.log('📞 Finalizando llamada:', currentCall.sid);
+            client.calls(currentCall.sid)
+                .update({status: 'completed'})
+                .then(() => console.log('✅ Llamada finalizada correctamente'))
+                .catch(err => console.error('❌ Error al finalizar llamada:', err));
+        }
+    });
+
+    ws.on('error', (error) => {
+        console.error('❌ Error en WebSocket:', error);
+    });
 });
 
 // Ruta de prueba
@@ -42,93 +107,8 @@ app.get('/', (req, res) => {
     });
 });
 
-// Ruta para verificar Twilio
-app.get('/verify', async (req, res) => {
-    try {
-        console.log('🔍 Verificando credenciales de Twilio...');
-        const account = await client.api.accounts(process.env.TWILIO_ACCOUNT_SID).fetch();
-        console.log('✅ Cuenta verificada:', account.friendlyName);
-        res.json({ 
-            status: 'ok',
-            account: account.friendlyName,
-            phoneNumber: process.env.TWILIO_PHONE_NUMBER
-        });
-    } catch (error) {
-        console.error('❌ Error verificando cuenta:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Ruta para hacer llamada de prueba
-app.get('/test-call', async (req, res) => {
-    try {
-        console.log('📞 Iniciando llamada de prueba...');
-        console.log('📊 Usando número:', process.env.TWILIO_PHONE_NUMBER);
-        
-        const call = await client.calls.create({
-            twiml: '<Response><Say language="es-ES">Esta es una llamada de prueba.</Say></Response>',
-            to: '+34671220070',
-            from: process.env.TWILIO_PHONE_NUMBER
-        }).catch(error => {
-            console.error('❌ Error de Twilio:', error);
-            throw error;
-        });
-
-        console.log('✅ Llamada de prueba iniciada:', call.sid);
-        res.json({ success: true, callId: call.sid });
-    } catch (error) {
-        console.error('❌ Error en llamada de prueba:', error);
-        console.error('Detalles:', {
-            message: error.message,
-            code: error.code,
-            status: error.status,
-            moreInfo: error.moreInfo
-        });
-        res.status(500).json({ 
-            error: error.message,
-            details: {
-                code: error.code,
-                status: error.status,
-                moreInfo: error.moreInfo
-            }
-        });
-    }
-});
-
-// Ruta para enviar SMS de prueba
-app.get('/test-sms', async (req, res) => {
-    try {
-        console.log('📱 Enviando SMS de prueba...');
-        const message = await client.messages.create({
-            body: 'Este es un mensaje de prueba.',
-            from: process.env.TWILIO_PHONE_NUMBER,
-            to: '+34671220070'
-        });
-        console.log('✅ SMS de prueba enviado:', message.sid);
-        res.json({ success: true, messageId: message.sid });
-    } catch (error) {
-        console.error('❌ Error enviando SMS de prueba:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
 // Iniciar servidor HTTP con WebSocket
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
     console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
-    console.log('📊 Variables de entorno:', {
-        SERVER_URL: process.env.SERVER_URL,
-        TWILIO_PHONE_NUMBER: process.env.TWILIO_PHONE_NUMBER,
-        TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID ? 'Presente' : 'Falta',
-        TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN ? 'Presente' : 'Falta'
-    });
-});
-
-// Manejar errores no capturados
-process.on('uncaughtException', (error) => {
-    console.error('❌ Error no capturado:', error);
-});
-
-process.on('unhandledRejection', (error) => {
-    console.error('❌ Promesa rechazada no manejada:', error);
 }); 
