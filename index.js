@@ -5,7 +5,6 @@ const client = require('twilio')(
     process.env.TWILIO_ACCOUNT_SID,
     process.env.TWILIO_AUTH_TOKEN
 );
-const { VoiceResponse } = require('twilio').twiml;
 
 const app = express();
 app.use(bodyParser.json());
@@ -41,7 +40,6 @@ app.post('/start-call', async (req, res) => {
     console.log('Variables de entorno:');
     console.log('TWILIO_ACCOUNT_SID:', process.env.TWILIO_ACCOUNT_SID);
     console.log('TWILIO_PHONE_NUMBER:', process.env.TWILIO_PHONE_NUMBER);
-    console.log('SERVER_URL:', process.env.SERVER_URL);
     
     try {
         let toNumber = req.body.to;
@@ -50,16 +48,12 @@ app.post('/start-call', async (req, res) => {
         }
 
         console.log('📞 Número destino:', toNumber);
-        
-        // URL para TwiML básico
-        const twimlUrl = `${process.env.SERVER_URL}/basic-twiml`;
-        console.log('🔗 URL TwiML:', twimlUrl);
 
-        // Intentar crear la llamada con configuración mínima
+        // Intentar crear la llamada usando una URL de TwiML estática
         const call = await client.calls.create({
             to: toNumber,
             from: process.env.TWILIO_PHONE_NUMBER,
-            url: twimlUrl
+            url: 'http://demo.twilio.com/docs/voice.xml'
         });
 
         console.log('✅ Llamada creada:', call.sid);
@@ -77,8 +71,5 @@ app.post('/start-call', async (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-    console.log('🚀 Servidor iniciado');
-    console.log('📍 Puerto:', PORT);
-    console.log('🌐 URL del servidor:', process.env.SERVER_URL);
-    console.log('📞 URL TwiML:', `${process.env.SERVER_URL}/basic-twiml`);
+    console.log('🚀 Servidor iniciado en puerto', PORT);
 }); 
